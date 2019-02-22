@@ -1,6 +1,7 @@
 package com.simplemobiletools.clock.extensions
 
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.app.*
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
@@ -9,12 +10,14 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
+import android.provider.Settings
+import android.support.v4.app.AlarmManagerCompat
+import android.support.v4.app.NotificationCompat
 import android.text.SpannableString
 import android.text.style.RelativeSizeSpan
 import android.widget.Toast
-import androidx.core.app.AlarmManagerCompat
-import androidx.core.app.NotificationCompat
 import com.simplemobiletools.clock.R
 import com.simplemobiletools.clock.activities.ReminderActivity
 import com.simplemobiletools.clock.activities.SnoozeReminderActivity
@@ -28,10 +31,7 @@ import com.simplemobiletools.clock.receivers.HideAlarmReceiver
 import com.simplemobiletools.clock.receivers.HideTimerReceiver
 import com.simplemobiletools.clock.services.SnoozeService
 import com.simplemobiletools.commons.extensions.*
-import com.simplemobiletools.commons.helpers.ALARM_SOUND_TYPE_ALARM
-import com.simplemobiletools.commons.helpers.DAY_MINUTES
-import com.simplemobiletools.commons.helpers.SILENT
-import com.simplemobiletools.commons.helpers.isOreoPlus
+import com.simplemobiletools.commons.helpers.*
 import java.util.*
 import kotlin.math.pow
 
@@ -82,13 +82,15 @@ fun Context.createNewAlarm(timeInMinutes: Int, weekDays: Int): Alarm {
 fun Context.scheduleNextAlarm(alarm: Alarm, showToast: Boolean) {
     val calendar = Calendar.getInstance()
     calendar.firstDayOfWeek = Calendar.MONDAY
-    for (i in 0..7) {
+    for (diesPerAlarma in 0..7) {
         val currentDay = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
         val isCorrectDay = alarm.days and 2.0.pow(currentDay).toInt() != 0
         val currentTimeInMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
-        if (isCorrectDay && (alarm.timeInMinutes > currentTimeInMinutes || i > 0)) {
-            val triggerInMinutes = alarm.timeInMinutes - currentTimeInMinutes + (i * DAY_MINUTES)
-            setupAlarmClock(alarm, triggerInMinutes * 60 - calendar.get(Calendar.SECOND))
+        if (isCorrectDay && (alarm.timeInMinutes > currentTimeInMinutes || diesPerAlarma > 0)) {
+            val triggerInMinutes = alarm.timeInMinutes - currentTimeInMinutes + (diesPerAlarma * DAY_MINUTES)
+            val triggerInSeconds = triggerInMinutes * 60 - calendar.get(Calendar.SECOND)
+
+            setupAlarmClock(alarm, triggerInSeconds)
 
             if (showToast) {
                 showRemainingTimeMessage(triggerInMinutes)
@@ -165,7 +167,10 @@ fun Context.scheduleNextWidgetUpdate() {
 
     val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val triggerAtMillis = System.currentTimeMillis() + getMSTillNextMinute()
-    alarmManager.setExact(AlarmManager.RTC, triggerAtMillis, pendingIntent)
+    when {
+        isKitkatPlus() -> alarmManager.setExact(AlarmManager.RTC, triggerAtMillis, pendingIntent)
+        else -> alarmManager.set(AlarmManager.RTC, triggerAtMillis, pendingIntent)
+    }
 }
 
 fun Context.getFormattedTime(passedSeconds: Int, showSeconds: Boolean, makeAmPmSmaller: Boolean): SpannableString {
@@ -192,20 +197,25 @@ fun Context.formatTo12HourFormat(showSeconds: Boolean, hours: Int, minutes: Int,
     return "${formatTime(showSeconds, false, newHours, minutes, seconds)} $appendable"
 }
 
+@TargetApi(Build.VERSION_CODES.LOLLIPOP)
 fun Context.getNextAlarm(): String {
-    val milliseconds = (getSystemService(Context.ALARM_SERVICE) as AlarmManager).nextAlarmClock?.triggerTime ?: return ""
-    val calendar = Calendar.getInstance()
-    val isDaylightSavingActive = TimeZone.getDefault().inDaylightTime(Date())
-    var offset = calendar.timeZone.rawOffset
-    if (isDaylightSavingActive) {
-        offset += TimeZone.getDefault().dstSavings
-    }
+    if (isLollipopPlus()) {
+        val milliseconds = (getSystemService(Context.ALARM_SERVICE) as AlarmManager).nextAlarmClock?.triggerTime ?: return ""
+        val calendar = Calendar.getInstance()
+        val isDaylightSavingActive = TimeZone.getDefault().inDaylightTime(Date())
+        var offset = calendar.timeZone.rawOffset
+        if (isDaylightSavingActive) {
+            offset += TimeZone.getDefault().dstSavings
+        }
 
-    calendar.timeInMillis = milliseconds
-    val dayOfWeekIndex = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
-    val dayOfWeek = resources.getStringArray(R.array.week_days_short)[dayOfWeekIndex]
-    val formatted = getFormattedTime(((milliseconds + offset) / 1000L).toInt(), false, false)
-    return "$dayOfWeek $formatted"
+        calendar.timeInMillis = milliseconds
+        val dayOfWeekIndex = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
+        val dayOfWeek = resources.getStringArray(R.array.week_days_short)[dayOfWeekIndex]
+        val formatted = getFormattedTime(((milliseconds + offset) / 1000L).toInt(), false, false)
+        return "$dayOfWeek $formatted"
+    } else {
+        return Settings.System.getString(contentResolver, Settings.System.NEXT_ALARM_FORMATTED) ?: ""
+    }
 }
 
 fun Context.rescheduleEnabledAlarms() {
@@ -279,7 +289,9 @@ fun Context.getTimerNotification(pendingIntent: PendingIntent, addDeleteIntent: 
         builder.setDeleteIntent(reminderActivityIntent)
     }
 
-    builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+    if (isLollipopPlus()) {
+        builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+    }
 
     if (config.timerVibrate) {
         val vibrateArray = LongArray(2) { 500 }
@@ -346,7 +358,9 @@ fun Context.getAlarmNotification(pendingIntent: PendingIntent, alarm: Alarm): No
             .addAction(R.drawable.ic_snooze, getString(R.string.snooze), getSnoozePendingIntent(alarm))
             .addAction(R.drawable.ic_cross, getString(R.string.dismiss), getHideAlarmPendingIntent(alarm))
 
-    builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+    if (isLollipopPlus()) {
+        builder.setVisibility(Notification.VISIBILITY_PUBLIC)
+    }
 
     if (alarm.vibrate) {
         val vibrateArray = LongArray(2) { 500 }

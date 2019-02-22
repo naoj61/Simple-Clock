@@ -30,8 +30,14 @@ class AlarmsAdapter(activity: SimpleActivity, var alarms: ArrayList<Alarm>, val 
 
     override fun prepareActionMode(menu: Menu) {}
 
+    override fun prepareItemSelection(viewHolder: ViewHolder) {}
+
+    override fun markViewHolderSelection(select: Boolean, viewHolder: ViewHolder?) {
+        viewHolder?.itemView?.alarm_frame?.isSelected = select
+    }
+
     override fun actionItemPressed(id: Int) {
-        if (selectedKeys.isEmpty()) {
+        if (selectedPositions.isEmpty()) {
             return
         }
 
@@ -44,18 +50,14 @@ class AlarmsAdapter(activity: SimpleActivity, var alarms: ArrayList<Alarm>, val 
 
     override fun getIsItemSelectable(position: Int) = true
 
-    override fun getItemSelectionKey(position: Int) = alarms.getOrNull(position)?.id
-
-    override fun getItemKeyPosition(key: Int) = alarms.indexOfFirst { it.id == key }
-
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = createViewHolder(R.layout.item_alarm, parent)
 
     override fun onBindViewHolder(holder: MyRecyclerViewAdapter.ViewHolder, position: Int) {
         val alarm = alarms[position]
-        holder.bindView(alarm, true, true) { itemView, layoutPosition ->
+        val view = holder.bindView(alarm, true, true) { itemView, layoutPosition ->
             setupView(itemView, alarm)
         }
-        bindViewHolder(holder)
+        bindViewHolder(holder, position, view)
     }
 
     override fun getItemCount() = alarms.size
@@ -68,22 +70,18 @@ class AlarmsAdapter(activity: SimpleActivity, var alarms: ArrayList<Alarm>, val 
 
     private fun deleteItems() {
         val alarmsToRemove = ArrayList<Alarm>()
-        val positions = getSelectedItemPositions()
-        getSelectedItems().forEach {
-            alarmsToRemove.add(it)
+        selectedPositions.sortedDescending().forEach {
+            val alarm = alarms[it]
+            alarmsToRemove.add(alarm)
         }
 
         alarms.removeAll(alarmsToRemove)
-        removeSelectedItems(positions)
+        removeSelectedItems()
         activity.dbHelper.deleteAlarms(alarmsToRemove)
     }
 
-    private fun getSelectedItems() = alarms.filter { selectedKeys.contains(it.id) } as ArrayList<Alarm>
-
     private fun setupView(view: View, alarm: Alarm) {
-        val isSelected = selectedKeys.contains(alarm.id)
         view.apply {
-            alarm_frame.isSelected = isSelected
             alarm_time.text = activity.getFormattedTime(alarm.timeInMinutes * 60, false, true)
             alarm_time.setTextColor(textColor)
 

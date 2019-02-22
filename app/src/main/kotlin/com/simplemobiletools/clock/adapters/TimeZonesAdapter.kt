@@ -29,8 +29,14 @@ class TimeZonesAdapter(activity: SimpleActivity, var timeZones: ArrayList<MyTime
 
     override fun prepareActionMode(menu: Menu) {}
 
+    override fun prepareItemSelection(viewHolder: ViewHolder) {}
+
+    override fun markViewHolderSelection(select: Boolean, viewHolder: ViewHolder?) {
+        viewHolder?.itemView?.time_zone_frame?.isSelected = select
+    }
+
     override fun actionItemPressed(id: Int) {
-        if (selectedKeys.isEmpty()) {
+        if (selectedPositions.isEmpty()) {
             return
         }
 
@@ -43,18 +49,14 @@ class TimeZonesAdapter(activity: SimpleActivity, var timeZones: ArrayList<MyTime
 
     override fun getIsItemSelectable(position: Int) = true
 
-    override fun getItemSelectionKey(position: Int) = timeZones.getOrNull(position)?.id
-
-    override fun getItemKeyPosition(key: Int) = timeZones.indexOfFirst { it.id == key }
-
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = createViewHolder(R.layout.item_time_zone, parent)
 
     override fun onBindViewHolder(holder: MyRecyclerViewAdapter.ViewHolder, position: Int) {
         val timeZone = timeZones[position]
-        holder.bindView(timeZone, true, true) { itemView, layoutPosition ->
+        val view = holder.bindView(timeZone, true, true) { itemView, layoutPosition ->
             setupView(itemView, timeZone)
         }
-        bindViewHolder(holder)
+        bindViewHolder(holder, position, view)
     }
 
     override fun getItemCount() = timeZones.size
@@ -70,23 +72,21 @@ class TimeZonesAdapter(activity: SimpleActivity, var timeZones: ArrayList<MyTime
     }
 
     private fun deleteItems() {
-        val timeZonesToRemove = ArrayList<MyTimeZone>(selectedKeys.size)
-        val timeZoneIDsToRemove = ArrayList<String>(selectedKeys.size)
-        val positions = getSelectedItemPositions()
-        getSelectedItems().forEach {
-            timeZonesToRemove.add(it)
-            timeZoneIDsToRemove.add(it.id.toString())
+        val timeZonesToRemove = ArrayList<MyTimeZone>()
+        val timeZoneIDsToRemove = ArrayList<String>()
+        selectedPositions.sortedDescending().forEach {
+            val timeZone = timeZones[it]
+            timeZonesToRemove.add(timeZone)
+            timeZoneIDsToRemove.add(timeZone.id.toString())
         }
 
         timeZones.removeAll(timeZonesToRemove)
-        removeSelectedItems(positions)
+        removeSelectedItems()
 
         val selectedTimeZones = activity.config.selectedTimeZones
         val newTimeZones = selectedTimeZones.filter { !timeZoneIDsToRemove.contains(it) }.toHashSet()
         activity.config.selectedTimeZones = newTimeZones
     }
-
-    private fun getSelectedItems() = timeZones.filter { selectedKeys.contains(it.id) } as ArrayList<MyTimeZone>
 
     private fun setupView(view: View, timeZone: MyTimeZone) {
         val currTimeZone = TimeZone.getTimeZone(timeZone.zoneName)
@@ -100,9 +100,7 @@ class TimeZonesAdapter(activity: SimpleActivity, var timeZones: ArrayList<MyTime
         val formattedTime = activity.getFormattedTime(passedSeconds, false, false)
         val formattedDate = activity.getFormattedDate(calendar)
 
-        val isSelected = selectedKeys.contains(timeZone.id)
         view.apply {
-            time_zone_frame.isSelected = isSelected
             time_zone_title.text = timeZone.title
             time_zone_title.setTextColor(textColor)
 
